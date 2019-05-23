@@ -1,0 +1,201 @@
+---
+title: "HW3-Zhenyu-Hong"
+output:
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#PartA
+##Question1
+```{r,message = FALSE, warnings = FALSE}
+library(modelr)
+library(ggplot2)
+library(tidyverse)
+library(mlbench)
+data("BostonHousing")
+data1=BostonHousing
+for (i in names(data1)){
+  print (data1%>%ggplot(aes_string(x=i,y="crim"))+geom_point())
+}
+#Categorical variables, how to make them looks like a boxplot
+data1%>%ggplot(aes(x=chas,y=crim))+geom_boxplot()
+data1%>%ggplot(aes(x=factor(rad),y=crim))+geom_boxplot()
+```
+
+I found that Lstat and dis are the most predictive. So next thing is to do some transformations over those two parameters in order to figure out the best linear relationship.
+
+```{r,message = FALSE, warnings = FALSE}
+data1%>%ggplot(aes(x=lstat,y=log2(crim)))+geom_point()
+data1%>%ggplot(aes(x=log2(lstat),y=log2(crim)))+geom_point()
+
+data1%>%ggplot(aes(x=(dis),y=log2(crim)))+geom_point()
+data1%>%ggplot(aes(x=log2(dis),y=log2(crim)))+geom_point()
+```
+
+I found the plot where x=log2(dis), y=log2(crim) has a strong linear relationship. Therefore, I decided to predict log2(crim) using log2(dis)
+
+```{r,message = FALSE, warnings = FALSE}
+fit1 <- lm(log2(crim)~log2(dis),data=data1)
+summary(fit1)
+coef(fit1)
+```
+
+The above is the summary of the fitted model parameters.
+
+##Problem 2
+```{r}
+for (i in names(data1)){
+  print (data1%>% add_residuals(fit1)%>%
+           ggplot()+geom_point(aes_string(x=i,y="resid")))
+}
+```
+
+I found out that some plots don't have random distribution over residual.And they are shown below.
+
+```{r}
+data1%>% add_residuals(fit1)%>%
+  ggplot()+geom_point(aes(x=nox,y=resid))
+
+data1%>% add_residuals(fit1)%>%
+  ggplot()+geom_point(aes(x=rad,y=resid))
+
+data1%>% add_residuals(fit1)%>%
+  ggplot()+geom_point(aes(x=tax,y=resid))
+```
+
+So, I used Adjusted R-square to find the optimal combination.
+
+```{r}
+fit2 <- lm(log2(crim)~log2(dis)+rad,data=data1)
+summary(fit2) 
+
+fit3 <- lm(log2(crim)~log2(dis)+nox,data=data1)
+summary(fit3)
+
+fit4 <- lm(log2(crim)~log2(dis)+tax,data=data1)
+summary(fit4) 
+
+```
+
+As a result, fit2 has the greatest Adj R-sqr, 0.83. Therefore, the final regression is:
+      log2(crim)=-2.422157-1.640766Xlog2(crim)+2.199782Xrad
+
+#PartB
+##Problem4
+The function is shown below:
+```{r}
+library(purrr)
+Perform_kcross <- function(formula,dataset,k){
+  dataset_cv <- crossv_kfold(dataset, k)
+  dataset_cv <- dataset_cv %>% 
+    mutate(fit = map(train, ~ lm(formula,data = .)))%>%
+    mutate(rmse = map2_dbl(fit,test,rmse))
+    return(mean(dataset_cv$rmse))
+}
+```
+
+
+##Problem5
+```{r}
+set.seed(12)
+(Problem1_model=Perform_kcross(log(crim)~log(dis),data1,5))
+
+(Problem3_model=Perform_kcross(log(crim)~log(dis)+rad,data1,5))
+```
+
+The model from problem 3 has a much smaller root-mean-square-error, which is 0.89,while the root-mean-square-error of model from problem 1 is around 1.45. Therefore, model from problem 3 is better due to a smaller error.
+
+#PartC
+##Problem6
+```{r}
+library(tokenizers)
+library(tidytext)
+text <- readLines("full_speech.txt")
+speech <- tibble(line=1:length(text), text=text)
+speech_tidy <- speech %>% unnest_tokens(word, text)
+
+speech_tidy %>%
+  filter(word!='applause')%>%
+  anti_join(stop_words, by="word") %>% count(word, sort=TRUE) %>%
+  top_n(15) %>%
+  mutate(word = reorder(word, n)) %>% ggplot(aes(x=word, y=n)) + 
+  geom_col() +
+  coord_flip()
+```
+
+##Problem7
+```{r}
+speech_bi <- speech%>%
+  unnest_tokens(bigram,text, token = "ngrams", n = 2)%>%
+  separate(bigram, c("word1", "word2"), sep = " ")%>%
+  filter(!word1 %in% stop_words$word) %>% 
+  filter(!word2 %in% stop_words$word) %>%
+  filter(word1!='applause') %>% 
+  filter(word2!='applause')
+  
+speech_bi_1 <- speech_bi%>%unite(bigram, word1, word2, sep = " ")%>%
+  count(bigram,sort=TRUE)
+
+speech_bi_1%>%
+  filter(n>=speech_bi_1$n[15])%>%
+  mutate(bigram = reorder(bigram, n))%>%
+  ggplot(aes(x=bigram,y=n))+geom_col()+
+  coord_flip()
+```
+
+##Problem8
+```{r}
+speech_bi_sentiment <- speech%>%
+  unnest_tokens(bigram,text, token = "ngrams", n = 2)%>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  filter(word1!='not')%>%
+  filter(word1!='no')%>%
+  filter(word1!='never')
+
+speech_bi_sentiment_word2 <- speech_bi_sentiment%>%
+  transmute(word2=word2)%>%
+  filter(word2!='applause')%>%
+  filter(word2!='trump')%>%
+  inner_join(get_sentiments("nrc"),by=c('word2'='word'))%>%
+  count(word2,sentiment,sort=TRUE)
+
+speech_bi_sentiment_word2%>%
+  group_by(sentiment)%>%
+  top_n(10)%>%
+  ungroup()%>%
+  mutate(word2=reorder(word2,n))%>%
+  ggplot(aes(x=word2,y=n))+
+  geom_col(show.legend=FALSE)+
+  coord_flip()+
+  facet_wrap(~sentiment,ncol=2,scales = "free")
+```
+
+
+##Problem9
+```{r}
+tidy_corpus <- function(src){
+  src_1=tibble(token=as.character(src),
+               line=1:length(src))
+  src_2 <- src_1 %>% unnest_tokens(word, token)
+  class(src_2)=c('tidy_corpus','tbl_df','tbl','data.frame')
+  return(src_2)
+}
+
+tidy_corpus_plot <- function(src){
+  b <- tidy_corpus(src)
+  b %>%
+    anti_join(stop_words, by="word") %>% count(word, sort=TRUE) %>%
+    top_n(10) %>%
+    mutate(word = reorder(word, n)) %>% ggplot(aes(x=word, y=n)) +
+    geom_col() +
+    coord_flip()
+}
+
+tidy_corpus(speech)
+tidy_corpus_plot(speech)
+```
+
